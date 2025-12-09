@@ -77,6 +77,11 @@ static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() 
 static const char *dmenucmd[] = { "rofi", "-show", "run", NULL };
 static const char *termcmd[]  = { "wezterm", NULL };
 
+/* media controls */
+static const char *playpause[] = { "playerctl", "play-pause", NULL };
+static const char *nextsong[]  = { "playerctl", "next", NULL };
+static const char *prevsong[]  = { "playerctl", "previous", NULL };
+
 static const Key keys[] = {
 	/* modifier                     key        function        argument */
 	{ MODKEY,                       XK_p,      spawn,          {.v = dmenucmd } },
@@ -130,6 +135,10 @@ static const Key keys[] = {
 	TAGKEYS(                        XK_9,                      8)
 	{ MODKEY|ShiftMask,             XK_q,      quit,           {0} },
 	{ MODKEY|ControlMask|ShiftMask, XK_q,      quit,           {1} },
+	/* media controls */
+	{ MODKEY|Mod1Mask,              XK_8,      spawn,          {.v = prevsong } },
+	{ MODKEY|Mod1Mask,              XK_9,      spawn,          {.v = playpause } },
+	{ MODKEY|Mod1Mask,              XK_0,      spawn,          {.v = nextsong } },
 };
 
 /* button definitions */
