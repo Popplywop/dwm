@@ -63,7 +63,11 @@
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
 enum { SchemeNorm, SchemeSel }; /* color schemes */
 enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
-       NetWMFullscreen, NetActiveWindow, NetWMWindowType,
+       NetWMFullscreen, NetWMStateMaximizedVert, NetWMStateMaximizedHorz, NetWMStateHidden,
+       NetWMStateModal, NetWMStateSticky, NetWMStateSkipTaskbar, NetWMStateSkipPager,
+       NetWMStateAbove, NetWMStateBelow, NetWMStateDemandsAttention, NetWMStateStaysOnTop,
+       NetWMStateOverlappedPresenter,
+       NetActiveWindow, NetWMWindowType,
        NetWMWindowTypeDialog, NetClientList, NetDesktopNames, NetDesktopViewport, NetNumberOfDesktops, NetCurrentDesktop, NetLast }; /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast }; /* default atoms */
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle,
@@ -79,6 +83,9 @@ struct TagState {
 typedef struct ClientState ClientState;
 struct ClientState {
 	int isfixed, isfloating, isurgent, neverfocus, oldstate, isfullscreen;
+	int ismaximized, ishidden, ismodal, issticky;
+	int isskiptaskbar, isskippager, isabove, isbelow;
+	int demandsattention, staysontop, overlappedpresenter;
 };
 
 typedef union {
@@ -108,6 +115,9 @@ struct Client {
 	int bw, oldbw;
 	unsigned int tags;
 	int isfixed, isfloating, isurgent, neverfocus, oldstate, isfullscreen;
+	int ismaximized, ishidden, ismodal, issticky;
+	int isskiptaskbar, isskippager, isabove, isbelow;
+	int demandsattention, staysontop, overlappedpresenter;
 	Client *next;
 	Client *snext;
 	Monitor *mon;
@@ -237,6 +247,18 @@ static void setcurrentdesktop(void);
 static void setdesktopnames(void);
 static void setfocus(Client *c);
 static void setfullscreen(Client *c, int fullscreen);
+static void setmaximized(Client *c, int maximized);
+static void sethidden(Client *c, int hidden);
+static void setmodal(Client *c, int modal);
+static void setsticky(Client *c, int sticky);
+static void setskiptaskbar(Client *c, int skiptaskbar);
+static void setskippager(Client *c, int skippager);
+static void setabove(Client *c, int above);
+static void setbelow(Client *c, int below);
+static void setdemandsattention(Client *c, int demandsattention);
+static void setstaysontop(Client *c, int staysontop);
+static void setoverlappedpresenter(Client *c, int overlappedpresenter);
+static void updatewmstate(Client *c);
 static void setnumdesktops(void);
 static void setviewport(void);
 static void fullscreen(const Arg *arg);
@@ -633,14 +655,69 @@ clientmessage(XEvent *e)
 {
 	XClientMessageEvent *cme = &e->xclient;
 	Client *c = wintoclient(cme->window);
+	unsigned long action;
 
 	if (!c)
 		return;
 	if (cme->message_type == netatom[NetWMState]) {
-		if (cme->data.l[1] == netatom[NetWMFullscreen]
-		|| cme->data.l[2] == netatom[NetWMFullscreen])
-			setfullscreen(c, (cme->data.l[0] == 1 /* _NET_WM_STATE_ADD    */
-				|| (cme->data.l[0] == 2 /* _NET_WM_STATE_TOGGLE */ && !c->isfullscreen)));
+		action = cme->data.l[0];
+
+		// Handle first state change
+		if (cme->data.l[1] == netatom[NetWMFullscreen]) {
+			setfullscreen(c, (action == 1 /* _NET_WM_STATE_ADD */
+				|| (action == 2 /* _NET_WM_STATE_TOGGLE */ && !c->isfullscreen)));
+		} else if (cme->data.l[1] == netatom[NetWMStateMaximizedVert] ||
+				   cme->data.l[1] == netatom[NetWMStateMaximizedHorz]) {
+			setmaximized(c, (action == 1 || (action == 2 && !c->ismaximized)));
+		} else if (cme->data.l[1] == netatom[NetWMStateHidden]) {
+			sethidden(c, (action == 1 || (action == 2 && !c->ishidden)));
+		} else if (cme->data.l[1] == netatom[NetWMStateModal]) {
+			setmodal(c, (action == 1 || (action == 2 && !c->ismodal)));
+		} else if (cme->data.l[1] == netatom[NetWMStateSticky]) {
+			setsticky(c, (action == 1 || (action == 2 && !c->issticky)));
+		} else if (cme->data.l[1] == netatom[NetWMStateSkipTaskbar]) {
+			setskiptaskbar(c, (action == 1 || (action == 2 && !c->isskiptaskbar)));
+		} else if (cme->data.l[1] == netatom[NetWMStateSkipPager]) {
+			setskippager(c, (action == 1 || (action == 2 && !c->isskippager)));
+		} else if (cme->data.l[1] == netatom[NetWMStateAbove]) {
+			setabove(c, (action == 1 || (action == 2 && !c->isabove)));
+		} else if (cme->data.l[1] == netatom[NetWMStateBelow]) {
+			setbelow(c, (action == 1 || (action == 2 && !c->isbelow)));
+		} else if (cme->data.l[1] == netatom[NetWMStateDemandsAttention]) {
+			setdemandsattention(c, (action == 1 || (action == 2 && !c->demandsattention)));
+		} else if (cme->data.l[1] == netatom[NetWMStateStaysOnTop]) {
+			setstaysontop(c, (action == 1 || (action == 2 && !c->staysontop)));
+		} else if (cme->data.l[1] == netatom[NetWMStateOverlappedPresenter]) {
+			setoverlappedpresenter(c, (action == 1 || (action == 2 && !c->overlappedpresenter)));
+		}
+
+		// Handle second state change if present
+		if (cme->data.l[2] == netatom[NetWMFullscreen]) {
+			setfullscreen(c, (action == 1 || (action == 2 && !c->isfullscreen)));
+		} else if (cme->data.l[2] == netatom[NetWMStateMaximizedVert] ||
+				   cme->data.l[2] == netatom[NetWMStateMaximizedHorz]) {
+			setmaximized(c, (action == 1 || (action == 2 && !c->ismaximized)));
+		} else if (cme->data.l[2] == netatom[NetWMStateHidden]) {
+			sethidden(c, (action == 1 || (action == 2 && !c->ishidden)));
+		} else if (cme->data.l[2] == netatom[NetWMStateModal]) {
+			setmodal(c, (action == 1 || (action == 2 && !c->ismodal)));
+		} else if (cme->data.l[2] == netatom[NetWMStateSticky]) {
+			setsticky(c, (action == 1 || (action == 2 && !c->issticky)));
+		} else if (cme->data.l[2] == netatom[NetWMStateSkipTaskbar]) {
+			setskiptaskbar(c, (action == 1 || (action == 2 && !c->isskiptaskbar)));
+		} else if (cme->data.l[2] == netatom[NetWMStateSkipPager]) {
+			setskippager(c, (action == 1 || (action == 2 && !c->isskippager)));
+		} else if (cme->data.l[2] == netatom[NetWMStateAbove]) {
+			setabove(c, (action == 1 || (action == 2 && !c->isabove)));
+		} else if (cme->data.l[2] == netatom[NetWMStateBelow]) {
+			setbelow(c, (action == 1 || (action == 2 && !c->isbelow)));
+		} else if (cme->data.l[2] == netatom[NetWMStateDemandsAttention]) {
+			setdemandsattention(c, (action == 1 || (action == 2 && !c->demandsattention)));
+		} else if (cme->data.l[2] == netatom[NetWMStateStaysOnTop]) {
+			setstaysontop(c, (action == 1 || (action == 2 && !c->staysontop)));
+		} else if (cme->data.l[2] == netatom[NetWMStateOverlappedPresenter]) {
+			setoverlappedpresenter(c, (action == 1 || (action == 2 && !c->overlappedpresenter)));
+		}
 	} else if (cme->message_type == netatom[NetActiveWindow]) {
 		if (c != selmon->sel && !c->isurgent)
 			seturgent(c, 1);
@@ -1909,11 +1986,46 @@ setfocus(Client *c)
 }
 
 void
+updatewmstate(Client *c)
+{
+	Atom states[16];
+	int i = 0;
+
+	if (c->isfullscreen)
+		states[i++] = netatom[NetWMFullscreen];
+	if (c->ismaximized) {
+		states[i++] = netatom[NetWMStateMaximizedVert];
+		states[i++] = netatom[NetWMStateMaximizedHorz];
+	}
+	if (c->ishidden)
+		states[i++] = netatom[NetWMStateHidden];
+	if (c->ismodal)
+		states[i++] = netatom[NetWMStateModal];
+	if (c->issticky)
+		states[i++] = netatom[NetWMStateSticky];
+	if (c->isskiptaskbar)
+		states[i++] = netatom[NetWMStateSkipTaskbar];
+	if (c->isskippager)
+		states[i++] = netatom[NetWMStateSkipPager];
+	if (c->isabove)
+		states[i++] = netatom[NetWMStateAbove];
+	if (c->isbelow)
+		states[i++] = netatom[NetWMStateBelow];
+	if (c->demandsattention)
+		states[i++] = netatom[NetWMStateDemandsAttention];
+	if (c->staysontop)
+		states[i++] = netatom[NetWMStateStaysOnTop];
+	if (c->overlappedpresenter)
+		states[i++] = netatom[NetWMStateOverlappedPresenter];
+
+	XChangeProperty(dpy, c->win, netatom[NetWMState], XA_ATOM, 32,
+		PropModeReplace, (unsigned char *)states, i);
+}
+
+void
 setfullscreen(Client *c, int fullscreen)
 {
 	if (fullscreen && !c->isfullscreen) {
-		XChangeProperty(dpy, c->win, netatom[NetWMState], XA_ATOM, 32,
-			PropModeReplace, (unsigned char*)&netatom[NetWMFullscreen], 1);
 		c->isfullscreen = 1;
 		c->oldstate = c->isfloating;
 		c->oldbw = c->bw;
@@ -1921,9 +2033,8 @@ setfullscreen(Client *c, int fullscreen)
 		c->isfloating = 1;
 		resizeclient(c, c->mon->mx, c->mon->my, c->mon->mw, c->mon->mh);
 		XRaiseWindow(dpy, c->win);
+		updatewmstate(c);
 	} else if (!fullscreen && c->isfullscreen){
-		XChangeProperty(dpy, c->win, netatom[NetWMState], XA_ATOM, 32,
-			PropModeReplace, (unsigned char*)0, 0);
 		c->isfullscreen = 0;
 		c->isfloating = c->oldstate;
 		c->bw = c->oldbw;
@@ -1933,6 +2044,139 @@ setfullscreen(Client *c, int fullscreen)
 		c->h = c->oldh;
 		resizeclient(c, c->x, c->y, c->w, c->h);
 		arrange(c->mon);
+		updatewmstate(c);
+	}
+}
+
+void
+setmaximized(Client *c, int maximized)
+{
+	if (maximized && !c->ismaximized) {
+		c->ismaximized = 1;
+		c->oldstate = c->isfloating;
+		c->oldbw = c->bw;
+		c->isfloating = 1;
+		/* Save current dimensions */
+		c->oldx = c->x;
+		c->oldy = c->y;
+		c->oldw = c->w;
+		c->oldh = c->h;
+		/* Maximize client */
+		resizeclient(c, c->mon->mx, c->mon->my, c->mon->mw - (2 * c->bw), c->mon->mh - (2 * c->bw));
+		updatewmstate(c);
+	} else if (!maximized && c->ismaximized) {
+		c->ismaximized = 0;
+		c->isfloating = c->oldstate;
+		c->bw = c->oldbw;
+		/* Restore dimensions */
+		resizeclient(c, c->oldx, c->oldy, c->oldw, c->oldh);
+		arrange(c->mon);
+		updatewmstate(c);
+	}
+}
+
+void
+sethidden(Client *c, int hidden)
+{
+	if (c->ishidden != hidden) {
+		c->ishidden = hidden;
+		updatewmstate(c);
+	}
+}
+
+void
+setmodal(Client *c, int modal)
+{
+	if (c->ismodal != modal) {
+		c->ismodal = modal;
+		c->isfloating = modal ? 1 : c->isfloating;
+		updatewmstate(c);
+		arrange(c->mon);
+	}
+}
+
+void
+setsticky(Client *c, int sticky)
+{
+	if (c->issticky != sticky) {
+		c->issticky = sticky;
+		updatewmstate(c);
+	}
+}
+
+void
+setskiptaskbar(Client *c, int skiptaskbar)
+{
+	if (c->isskiptaskbar != skiptaskbar) {
+		c->isskiptaskbar = skiptaskbar;
+		updatewmstate(c);
+	}
+}
+
+void
+setskippager(Client *c, int skippager)
+{
+	if (c->isskippager != skippager) {
+		c->isskippager = skippager;
+		updatewmstate(c);
+	}
+}
+
+void
+setabove(Client *c, int above)
+{
+	if (c->isabove != above) {
+		c->isabove = above;
+		if (above) {
+			c->isbelow = 0;
+			XRaiseWindow(dpy, c->win);
+		}
+		updatewmstate(c);
+	}
+}
+
+void
+setbelow(Client *c, int below)
+{
+	if (c->isbelow != below) {
+		c->isbelow = below;
+		if (below) {
+			c->isabove = 0;
+			// For below, we would need to lower window
+			// but dwm doesn't have direct support for this
+		}
+		updatewmstate(c);
+	}
+}
+
+void
+setdemandsattention(Client *c, int demandsattention)
+{
+	if (c->demandsattention != demandsattention) {
+		c->demandsattention = demandsattention;
+		seturgent(c, demandsattention);
+		updatewmstate(c);
+	}
+}
+
+void
+setstaysontop(Client *c, int staysontop)
+{
+	if (c->staysontop != staysontop) {
+		c->staysontop = staysontop;
+		if (staysontop)
+			XRaiseWindow(dpy, c->win);
+		updatewmstate(c);
+		arrange(c->mon);
+	}
+}
+
+void
+setoverlappedpresenter(Client *c, int overlappedpresenter)
+{
+	if (c->overlappedpresenter != overlappedpresenter) {
+		c->overlappedpresenter = overlappedpresenter;
+		updatewmstate(c);
 	}
 }
 
@@ -2138,6 +2382,18 @@ setup(void)
 	netatom[NetWMState] = XInternAtom(dpy, "_NET_WM_STATE", False);
 	netatom[NetWMCheck] = XInternAtom(dpy, "_NET_SUPPORTING_WM_CHECK", False);
 	netatom[NetWMFullscreen] = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+	netatom[NetWMStateMaximizedVert] = XInternAtom(dpy, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+	netatom[NetWMStateMaximizedHorz] = XInternAtom(dpy, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+	netatom[NetWMStateHidden] = XInternAtom(dpy, "_NET_WM_STATE_HIDDEN", False);
+	netatom[NetWMStateModal] = XInternAtom(dpy, "_NET_WM_STATE_MODAL", False);
+	netatom[NetWMStateSticky] = XInternAtom(dpy, "_NET_WM_STATE_STICKY", False);
+	netatom[NetWMStateSkipTaskbar] = XInternAtom(dpy, "_NET_WM_STATE_SKIP_TASKBAR", False);
+	netatom[NetWMStateSkipPager] = XInternAtom(dpy, "_NET_WM_STATE_SKIP_PAGER", False);
+	netatom[NetWMStateAbove] = XInternAtom(dpy, "_NET_WM_STATE_ABOVE", False);
+	netatom[NetWMStateBelow] = XInternAtom(dpy, "_NET_WM_STATE_BELOW", False);
+	netatom[NetWMStateDemandsAttention] = XInternAtom(dpy, "_NET_WM_STATE_DEMANDS_ATTENTION", False);
+	netatom[NetWMStateStaysOnTop] = XInternAtom(dpy, "_NET_WM_STATE_STAYS_ON_TOP", False);
+	netatom[NetWMStateOverlappedPresenter] = XInternAtom(dpy, "_NET_WM_STATE_OVERLAPPED_PRESENTER", False);
 	netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
 	netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
 	netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
@@ -2709,11 +2965,58 @@ updatetitle(Client *c)
 void
 updatewindowtype(Client *c)
 {
-	Atom state = getatomprop(c, netatom[NetWMState]);
+	Atom state, *states = NULL;
+	int format;
+	unsigned long i, numstates, after;
 	Atom wtype = getatomprop(c, netatom[NetWMWindowType]);
 
-	if (state == netatom[NetWMFullscreen])
+	// Initialize state flags to default values
+	c->isfullscreen = c->ismaximized = c->ishidden = c->ismodal = 0;
+	c->issticky = c->isskiptaskbar = c->isskippager = 0;
+	c->isabove = c->isbelow = c->demandsattention = c->staysontop = 0;
+	c->overlappedpresenter = 0;
+
+	// Get all window states
+	if (XGetWindowProperty(dpy, c->win, netatom[NetWMState], 0L, sizeof(Atom),
+			False, XA_ATOM, &state, &format, &numstates, &after, (unsigned char **)&states) == Success) {
+		if (states) {
+			for (i = 0; i < numstates; i++) {
+				if (states[i] == netatom[NetWMFullscreen])
+					c->isfullscreen = 1;
+				else if (states[i] == netatom[NetWMStateMaximizedVert] || states[i] == netatom[NetWMStateMaximizedHorz])
+					c->ismaximized = 1;
+				else if (states[i] == netatom[NetWMStateHidden])
+					c->ishidden = 1;
+				else if (states[i] == netatom[NetWMStateModal])
+					c->ismodal = 1;
+				else if (states[i] == netatom[NetWMStateSticky])
+					c->issticky = 1;
+				else if (states[i] == netatom[NetWMStateSkipTaskbar])
+					c->isskiptaskbar = 1;
+				else if (states[i] == netatom[NetWMStateSkipPager])
+					c->isskippager = 1;
+				else if (states[i] == netatom[NetWMStateAbove])
+					c->isabove = 1;
+				else if (states[i] == netatom[NetWMStateBelow])
+					c->isbelow = 1;
+				else if (states[i] == netatom[NetWMStateDemandsAttention])
+					c->demandsattention = 1;
+				else if (states[i] == netatom[NetWMStateStaysOnTop])
+					c->staysontop = 1;
+					else if (states[i] == netatom[NetWMStateOverlappedPresenter])
+						c->overlappedpresenter = 1;
+			}
+			XFree(states);
+		}
+	}
+
+	// Apply window states
+	if (c->isfullscreen)
 		setfullscreen(c, 1);
+	if (c->ismaximized)
+		setmaximized(c, 1);
+	if (c->ismodal)
+		c->isfloating = 1;
 	if (wtype == netatom[NetWMWindowTypeDialog])
 		c->isfloating = 1;
 }
