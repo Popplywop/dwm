@@ -43,9 +43,7 @@ static const Rule rules[] = {
 	/* class                    instance  title      tags mask  isfloating  monitor  appicon */
 	{ "org.wezfurlong.wezterm", NULL,     NULL,      1 << 0,    0,          0,       ""  },
 	{ "Cider",                  NULL,     NULL,      1 << 1,    0,          0,       ""  },
-  { "Microsoft-edge",         NULL,     NULL,      1,         0,          1,       ""  },
-	{ "Microsoft-edge",         NULL,     "Teams",   1,         0,          2,       "󰊻"  },
-	{ "Microsoft-edge",         NULL,     "Outlook", 1,         0,          1,       "󰴢"  },
+	{ "qutebrowser",            NULL,     NULL,      1,         0,          1,       ""  },
 };
 
 /* layout(s) */
